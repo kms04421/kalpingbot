@@ -268,7 +268,7 @@ namespace EternalReturnBot
         {
             if (string.IsNullOrWhiteSpace(nickname)) return;
 
-            var msg = await ReplyAsync($"🔮 **{nickname}** 님의 전투력을 측정 중입니다... (랭크 최근 10판을 찾습니다!)");
+            var msg = await ReplyAsync($"🔮 **{nickname}** 님의 전투력을 측정 중입니다... (랭크 최근 15판을 찾습니다!)");
 
             using (var localClient = new HttpClient())
             {
@@ -296,7 +296,7 @@ namespace EternalReturnBot
                     int currentMMR = 0;
 
                     // 🌟 최대 10페이지(100판) 스캔. 단, 랭크 10판이 모이면 즉시 탈출
-                    for (int i = 0; i < 10; i++)
+                    for (int i = 0; i < 15; i++)
                     {
                         string gamesUrl = "https://open-api.bser.io/v1/user/games/uid/" + userId;
                         if (!string.IsNullOrEmpty(nextId)) gamesUrl += "?next=" + Uri.EscapeDataString(nextId);
@@ -320,7 +320,7 @@ namespace EternalReturnBot
                         }
 
                         // 랭크 10판을 채웠거나, 더 이상 다음 기록이 없으면 반복 종료
-                        if (rankedGames.Count >= 10 || gJson["next"] == null) break;
+                        if (rankedGames.Count >= 15 || gJson["next"] == null) break;
 
                         nextId = gJson["next"].ToString();
                         await Task.Delay(1000); // API Rate Limit 보호
@@ -328,7 +328,7 @@ namespace EternalReturnBot
 
                     if (rankedGames.Count < 3)
                     {
-                        await msg.ModifyAsync(x => x.Content = $"⚠️ 최근 100판의 전적을 뒤졌지만 랭크 기록이 부족합니다. (현재 {rankedGames.Count}판 찾음)");
+                        await msg.ModifyAsync(x => x.Content = $"⚠️ 최근 전적을 뒤졌지만 랭크 기록이 부족합니다. (현재 {rankedGames.Count}판 찾음)");
                         return;
                     }
 
