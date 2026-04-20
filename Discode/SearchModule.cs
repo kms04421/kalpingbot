@@ -261,17 +261,14 @@ namespace EternalReturnBot
         }
 
         // ---------------------------------------------------------------------
-        // 3. !티어측정 (전투력 계산기)
-        // ---------------------------------------------------------------------
-        // ---------------------------------------------------------------------
-        // 5. !티어측정 (전투력 측정기 - MMR 등락선 & 판당 퍼포먼스 그래프 적용 완벽판)
+        // 3. !티어측정 (최근 100판 중 랭크 10판 탐색 완료 시 즉시 반환)
         // ---------------------------------------------------------------------
         [Command("티어측정", RunMode = RunMode.Async)]
         public async Task PredictTier([Remainder] string nickname)
         {
             if (string.IsNullOrWhiteSpace(nickname)) return;
 
-            var msg = await ReplyAsync($"🔮 **{nickname}** 님의 전투력을 측정 중입니다... (랭크 20판을 찾을 때까지 전적을 뒤집니다!)");
+            var msg = await ReplyAsync($"🔮 **{nickname}** 님의 전투력을 측정 중입니다... (랭크 최근 10판을 찾습니다!)");
 
             using (var localClient = new HttpClient())
             {
@@ -292,12 +289,13 @@ namespace EternalReturnBot
                         return;
                     }
                     string userId = uJson["user"]["userId"].ToString();
-                    await Task.Delay(1100);
+                    await Task.Delay(1000);
 
                     List<Newtonsoft.Json.Linq.JToken> rankedGames = new List<Newtonsoft.Json.Linq.JToken>();
                     string nextId = "";
                     int currentMMR = 0;
 
+                    // 🌟 최대 10페이지(100판) 스캔. 단, 랭크 10판이 모이면 즉시 탈출
                     for (int i = 0; i < 10; i++)
                     {
                         string gamesUrl = "https://open-api.bser.io/v1/user/games/uid/" + userId;
@@ -314,17 +312,21 @@ namespace EternalReturnBot
                                 {
                                     rankedGames.Add(game);
                                     if (currentMMR == 0) currentMMR = game["mmrAfter"]?.ToObject<int>() ?? 0;
+
+                                    // 10판 모이면 for문 전체를 끝내기 위해 break
+                                    if (rankedGames.Count >= 10) break;
                                 }
                             }
                         }
 
-                        if (rankedGames.Count >= 20 || gJson["next"] == null) break;
+                        // 랭크 10판을 채웠거나, 더 이상 다음 기록이 없으면 반복 종료
+                        if (rankedGames.Count >= 10 || gJson["next"] == null) break;
 
                         nextId = gJson["next"].ToString();
-                        await Task.Delay(1100);
+                        await Task.Delay(1000); // API Rate Limit 보호
                     }
 
-                    if (rankedGames.Count < 5)
+                    if (rankedGames.Count < 3)
                     {
                         await msg.ModifyAsync(x => x.Content = $"⚠️ 최근 100판의 전적을 뒤졌지만 랭크 기록이 부족합니다. (현재 {rankedGames.Count}판 찾음)");
                         return;
@@ -339,7 +341,6 @@ namespace EternalReturnBot
                     List<int> graphMMRs = new List<int>();
                     List<int> graphPerfs = new List<int>();
 
-                    // 최신순 데이터를 과거순으로 뒤집기 (그래프가 왼쪽에서 오른쪽으로 흐르게)
                     var chronGames = rankedGames.AsEnumerable().Reverse().ToList();
 
                     foreach (var game in chronGames)
@@ -349,15 +350,13 @@ namespace EternalReturnBot
                         int dmg = game["damageToPlayer"]?.ToObject<int>() ?? 0;
                         int mmr = game["mmrAfter"]?.ToObject<int>() ?? 0;
 
-                        // 🧮 [단일 게임 퍼포먼스] 해당 판의 딜량, 킬관여, 순위로만 전투력 계산!
                         double singlePerf = (dmg * 0.3) + (tk * 850) + ((8.0 - rnk) * 1200);
-                        singlePerf = Math.Max(0, singlePerf); // 마이너스 방지
+                        singlePerf = Math.Max(0, singlePerf);
 
                         graphMMRs.Add(mmr);
                         graphPerfs.Add((int)singlePerf);
                     }
 
-                    // 종합 전투력용 데이터 합산
                     foreach (var game in rankedGames)
                     {
                         sumDmg += game["damageToPlayer"]?.ToObject<int>() ?? 0;
@@ -421,9 +420,6 @@ namespace EternalReturnBot
                     else
                         gapDesc = $"### 👌 무난한 1인분\n현재 티어에서 밥값은 충분히 하고 있습니다.\n\n{comment}";
 
-                    // =========================================================
-                    // 📈 [에러 100% 차단] 단축 URL(Short URL) 발급 방식
-                    // =========================================================
                     string mmrDataStr = string.Join(",", graphMMRs);
                     string perfDataStr = string.Join(",", graphPerfs);
                     string labelsStr = string.Join(",", Enumerable.Range(1, graphMMRs.Count).Select(x => $"'{x}'"));
@@ -440,7 +436,7 @@ namespace EternalReturnBot
                                     borderColor: '#FF6384',
                                     backgroundColor: 'rgba(255, 99, 132, 0)',
                                     borderWidth: 3,
-                                    fill: false, // 선만 깔끔하게 보이도록 투명화
+                                    fill: false,
                                     yAxisID: 'y'
                                 }},
                                 {{
@@ -460,7 +456,7 @@ namespace EternalReturnBot
                                     {{
                                         id: 'y',
                                         position: 'left',
-                                        ticks: {{ fontColor: '#FFFFFF' }}, // MMR에 맞게 자동 조절됨
+                                        ticks: {{ fontColor: '#FFFFFF' }},
                                         gridLines: {{ color: 'rgba(255, 255, 255, 0.2)' }}
                                     }},
                                     {{
@@ -498,7 +494,7 @@ namespace EternalReturnBot
                         .WithDescription(gapDesc)
                         .AddField("현재 티어 (Current)", $"{currentTierName}\n(MMR: {currentMMR})", true)
                         .AddField("분석된 적정 티어 (Potential)", $"**{predictedTier}**\n(종합 전투력: {combatScore:N0})", true)
-                        .AddField("📊 분석 데이터 (최근 20판 평균)", $"평딜: {avgDmg:N0}\n평균 TK: {avgTK:F1}\n평균 순위: #{avgRank:F1}", false);
+                        .AddField($"📊 분석 데이터 (최근 {rankedGames.Count}판 평균)", $"평딜: {avgDmg:N0}\n평균 TK: {avgTK:F1}\n평균 순위: #{avgRank:F1}", false);
 
                     if (!string.IsNullOrEmpty(shortChartUrl))
                     {
@@ -516,6 +512,7 @@ namespace EternalReturnBot
                 }
             }
         }
+
 
         // --- 보조 메소드 ---
 
